@@ -115,6 +115,50 @@
 </div>
 
 <div class="panel">
+  <div class="label"><span>Sound details</span><span id="sdInfo"></span></div>
+  <canvas id="sgram" style="height:140px"></canvas>
+  <div class="readout">
+    <div><small>Dominant</small><span id="sdDom">–</span></div>
+    <div><small>Brightness</small><span id="sdCent">–</span></div>
+    <div><small>Noise floor</small><span id="sdFloor">–</span></div>
+    <div><small>Loudness</small><span id="sdLoud">–</span></div>
+    <div><small>Crest factor</small><span id="sdCrest">–</span></div>
+    <div><small>Hits / min</small><span id="sdHits">–</span></div>
+  </div>
+  <p class="note">Spectrogram: time runs left to right, pitch bottom to top, brighter = louder. Brightness is the spectral centroid (where the sound's energy sits). Crest factor is peak vs average: high for knocks and clicks, low for steady hums. Hits/min counts sharp bursts.</p>
+</div>
+
+<div class="panel">
+  <div class="label"><span>Sound detector</span><span id="detState">not trained</span></div>
+  <div id="detNow" style="font-size:22px;font-weight:700;margin:4px 0 8px">–</div>
+  <div class="row">
+    <input id="detName" placeholder="Name a sound, e.g. Knock" style="flex:1;min-width:0;background:#1f2630;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:15px">
+    <button id="detAdd">Add sound</button>
+  </div>
+  <div id="detClasses" style="margin-top:8px"></div>
+  <div class="slider"><span>Confidence</span><input id="detConf" type="range" min="50" max="100" step="5" value="80"><output id="detConfOut">80%</output></div>
+  <div class="readout" style="grid-template-columns:repeat(2,1fr)">
+    <div><small>Measured accuracy</small><span id="detAcc">–</span></div>
+    <div><small>Examples</small><span id="detCount">0</span></div>
+  </div>
+  <div class="note" id="detAccNote" style="margin-top:6px"></div>
+  <div class="row" style="margin-top:10px">
+    <button id="detTest" class="grow">Re-test accuracy</button>
+    <button id="detClear" class="grow">Clear detector</button>
+  </div>
+  <div class="label" style="margin-top:12px"><span>Detections</span><span id="detLogCount"></span></div>
+  <div id="detLog" class="note" style="max-height:140px;overflow:auto"></div>
+  <details style="margin-top:8px"><summary>How to train it</summary>
+    <ul class="note">
+      <li>Add a sound called <b>Background</b> first and record 5 or more examples of normal, quiet conditions. The detector uses it to tell when none of your sounds is present.</li>
+      <li>Add each sound you want detected, and record 5 to 10 one-second examples of each. Make the sound during the recording.</li>
+      <li>Record the examples the way you'll use it: same mic placement, same gain.</li>
+      <li>Measured accuracy is a leave-one-out test: each example is hidden in turn and classified using all the others. Above 90% on your examples is a good sign, but real conditions can be harder. Add more varied examples if it drops.</li>
+    </ul>
+  </details>
+</div>
+
+<div class="panel">
   <div class="label"><span>Controls</span></div>
   <div class="slider"><span>Input gain</span><input id="gain" type="range" min="-12" max="40" step="0.5" value="0"><output id="gainOut">0 dB</output></div>
   <div class="slider"><span>Low cut</span><input id="hpf" type="range" min="0" max="400" step="5" value="0"><output id="hpfOut">off</output></div>
@@ -330,7 +374,7 @@
       freqBuf = new Float32Array(analyser.frequencyBinCount);
       await openStream();
       running = true;
-      window.dispatchEvent(new CustomEvent('cm-started', { detail: { ctx, node: hpf } }));
+      window.dispatchEvent(new CustomEvent('cm-started', { detail: { ctx, node: hpf, analyser } }));
       $('start-wrap').style.display = 'none';
       ['monBtn', 'recBtn', 'holdReset'].forEach(id => $(id).disabled = false);
       keepAwake();
@@ -844,6 +888,209 @@
     g.textAlign = 'left'; g.fillStyle = '#5b6672'; g.fillText('rate, s/day (±' + maxR.toFixed(0) + ')', 4 * d, 12 * d);
   }
   drawPositions();
+})();
+</script>
+<script>
+// ---------- Sound details + teachable detector (Listen tab) ----------
+(() => {
+  const $ = id => document.getElementById(id);
+  const FPS = 20, CLIP = 20, NB = 24;   // 1 s clips of 20 frames, 24 log bands
+  let an, ctx, fbuf, tbuf, bandIdx = [], frames = [], hitTimes = [], lastRmsHist = [];
+  const HIST = 200;                     // frames kept (10 s)
+
+  window.addEventListener('cm-started', e => {
+    an = e.detail.analyser; ctx = e.detail.ctx;
+    fbuf = new Float32Array(an.frequencyBinCount); tbuf = new Float32Array(an.fftSize);
+    const nyq = ctx.sampleRate / 2, fLo = 60, fHi = Math.min(16000, nyq * 0.95), binHz = nyq / an.frequencyBinCount;
+    for (let b = 0; b <= NB; b++) bandIdx.push(Math.max(1, Math.round(fLo * Math.pow(fHi / fLo, b / NB) / binHz)));
+    setInterval(tick, 1000 / FPS);
+    setInterval(classifyLive, 250);
+  });
+
+  // ---- per-frame analysis ----
+  function tick() {
+    an.getFloatFrequencyData(fbuf); an.getFloatTimeDomainData(tbuf);
+    const bands = new Float32Array(NB);
+    for (let b = 0; b < NB; b++) {
+      let p = 0, n = 0; for (let i = bandIdx[b]; i < Math.max(bandIdx[b] + 1, bandIdx[b + 1]); i++) { p += Math.pow(10, fbuf[i] / 10); n++; }
+      bands[b] = 10 * Math.log10(p / n + 1e-20);
+    }
+    let ss = 0, pk = 0; for (let i = 0; i < tbuf.length; i++) { ss += tbuf[i] * tbuf[i]; const a = Math.abs(tbuf[i]); if (a > pk) pk = a; }
+    const rms = Math.sqrt(ss / tbuf.length), rmsDb = 20 * Math.log10(rms + 1e-9), crest = 20 * Math.log10((pk + 1e-9) / (rms + 1e-9));
+    const binHz = ctx.sampleRate / 2 / fbuf.length;
+    let num = 0, den = 0, dom = 0, domV = -1e9;
+    for (let i = 2; i < fbuf.length; i++) { const p = Math.pow(10, fbuf[i] / 10); num += p * i * binHz; den += p; if (fbuf[i] > domV && i * binHz > 30) { domV = fbuf[i]; dom = i * binHz; } }
+    const cent = den ? num / den : 0;
+    const f = { bands, rmsDb, crest, cent, dom, t: performance.now() };
+    frames.push(f); if (frames.length > HIST) frames.shift();
+    // hits: sharp rise above recent median
+    lastRmsHist.push(rmsDb); if (lastRmsHist.length > 100) lastRmsHist.shift();
+    const med = lastRmsHist.slice().sort((a, b) => a - b)[lastRmsHist.length >> 1];
+    const prev = frames.length > 1 ? frames[frames.length - 2].rmsDb : rmsDb;
+    if (rmsDb > med + 10 && prev <= med + 10 && rmsDb > -70) hitTimes.push(f.t);
+    while (hitTimes.length && f.t - hitTimes[0] > 60000) hitTimes.shift();
+    if (recording) recording.push(f);
+    if ($('view-listen').style.display !== 'none') { drawSgram(bands); details(f, med); }
+  }
+
+  function details(f, floor) {
+    const fmtHz = v => v >= 1000 ? (v / 1000).toFixed(2) + ' kHz' : Math.round(v) + ' Hz';
+    $('sdDom').textContent = f.rmsDb > -80 ? fmtHz(f.dom) : '–';
+    $('sdCent').textContent = f.rmsDb > -80 ? fmtHz(f.cent) : '–';
+    $('sdFloor').textContent = floor.toFixed(0) + ' dB';
+    $('sdLoud').textContent = f.rmsDb.toFixed(0) + ' dB';
+    $('sdCrest').textContent = f.crest.toFixed(1) + ' dB';
+    const span = Math.min(60000, frames.length / FPS * 1000);
+    $('sdHits').textContent = span > 5000 ? Math.round(hitTimes.length * 60000 / span) : '…';
+  }
+
+  function drawSgram(bands) {
+    const c = $('sgram'), r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    const w = Math.round(r.width * d), h = Math.round(r.height * d); if (!w) return;
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const g = c.getContext('2d'), colW = Math.max(1, Math.round(w / HIST));
+    g.drawImage(c, -colW, 0);
+    const bh = h / NB;
+    for (let b = 0; b < NB; b++) {
+      const v = Math.max(0, Math.min(1, (bands[b] + 110) / 90));
+      g.fillStyle = 'hsl(' + (200 - 160 * v) + ',80%,' + (6 + 55 * v) + '%)';
+      g.fillRect(w - colW, h - (b + 1) * bh, colW, Math.ceil(bh));
+    }
+  }
+
+  // ---- clip features ----
+  function clipFeatures(fr) {
+    const n = fr.length, mean = new Array(NB).fill(0), sd = new Array(NB).fill(0);
+    fr.forEach(f => f.bands.forEach((v, b) => mean[b] += v / n));
+    fr.forEach(f => f.bands.forEach((v, b) => sd[b] += (v - mean[b]) * (v - mean[b]) / n));
+    const lvl = mean.reduce((s, v) => s + v, 0) / NB;
+    const loud = fr.map(f => f.rmsDb), lm = loud.reduce((s, v) => s + v, 0) / n;
+    const crest = fr.reduce((s, f) => s + f.crest, 0) / n;
+    const cent = fr.reduce((s, f) => s + Math.log2(f.cent + 1), 0) / n;
+    return [...mean.map(v => v - lvl), ...sd.map(Math.sqrt), lvl, Math.max(...loud) - lm, crest, cent];
+  }
+  function bestWindow(fr) {
+    if (fr.length <= CLIP) return fr;
+    let best = 0, bi = 0;
+    for (let i = 0; i + CLIP <= fr.length; i++) { let e = 0; for (let j = i; j < i + CLIP; j++) e += Math.pow(10, fr[j].rmsDb / 10); if (e > best) { best = e; bi = i; } }
+    return fr.slice(bi, bi + CLIP);
+  }
+
+  // ---- model ----
+  let model = { classes: [] };
+  try { model = JSON.parse(localStorage.getItem('cm-det') || '') || model; } catch (e) {}
+  const save = () => { try { localStorage.setItem('cm-det', JSON.stringify(model)); } catch (e) {} };
+  let stats = null, typicalD = 1;
+
+  function allExamples() { const out = []; model.classes.forEach((c, ci) => c.ex.forEach(v => out.push({ v, ci }))); return out; }
+  function fitStats(ex) {
+    const D = ex[0].v.length, mu = new Array(D).fill(0), sg = new Array(D).fill(0);
+    ex.forEach(e => e.v.forEach((x, i) => mu[i] += x / ex.length));
+    ex.forEach(e => e.v.forEach((x, i) => sg[i] += (x - mu[i]) * (x - mu[i]) / ex.length));
+    return { mu, sg: sg.map(v => Math.sqrt(v) + 1e-3) };
+  }
+  const z = (v, st) => v.map((x, i) => (x - st.mu[i]) / st.sg[i]);
+  const dist = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += (a[i] - b[i]) * (a[i] - b[i]); return Math.sqrt(s); };
+
+  function knn(q, pool) {
+    const k = Math.min(5, pool.length);
+    const ds = pool.map(p => ({ d: dist(q, p.zv), ci: p.ci })).sort((a, b) => a.d - b.d).slice(0, k);
+    const w = {}; let tot = 0;
+    ds.forEach(x => { const wt = 1 / (x.d + 1e-6); w[x.ci] = (w[x.ci] || 0) + wt; tot += wt; });
+    let ci = -1, bw = -1; Object.keys(w).forEach(c => { if (w[c] > bw) { bw = w[c]; ci = +c; } });
+    return { ci, conf: bw / tot, nearest: ds[0].d };
+  }
+
+  function retrain() {
+    const ex = allExamples();
+    $('detCount').textContent = ex.length;
+    const usable = model.classes.filter(c => c.ex.length >= 2).length;
+    if (ex.length < 4 || usable < 2) { stats = null; $('detState').textContent = 'not trained'; $('detAcc').textContent = '–'; $('detAccNote').textContent = 'Add at least 2 sounds with 2 or more examples each (5 to 10 is better).'; renderClasses(); return; }
+    stats = fitStats(ex); ex.forEach(e => e.zv = z(e.v, stats));
+    // leave-one-out accuracy
+    let ok = 0; const nn = []; const per = model.classes.map(() => ({ n: 0, ok: 0 }));
+    ex.forEach((e, i) => {
+      const pool = ex.filter((_, j) => j !== i); const r = knn(e.zv, pool);
+      per[e.ci].n++; if (r.ci === e.ci) { ok++; per[e.ci].ok++; } nn.push(r.nearest);
+    });
+    nn.sort((a, b) => a - b); typicalD = nn[Math.floor(nn.length * 0.9)] || 1;
+    const acc = ok / ex.length;
+    $('detAcc').textContent = Math.round(acc * 100) + '%';
+    $('detAcc').className = acc >= 0.9 ? 'q-good' : acc >= 0.75 ? 'q-mid' : 'q-bad';
+    const small = model.classes.filter(c => c.ex.length < 5).map(c => c.name);
+    $('detAccNote').textContent = (acc >= 0.9 ? 'Meets the 90% target on your examples. ' : 'Below the 90% target. Add more examples, or make the sounds more distinct (mic placement, gain). ') +
+      (small.length ? 'Fewer than 5 examples: ' + small.join(', ') + '.' : '') +
+      ' Per sound: ' + model.classes.map((c, i) => c.name + ' ' + (per[i].n ? Math.round(per[i].ok / per[i].n * 100) + '%' : '–')).join(', ');
+    $('detState').textContent = 'trained';
+    trained = ex; renderClasses();
+  }
+  let trained = [];
+
+  // ---- UI ----
+  let recording = null;
+  function renderClasses() {
+    const box = $('detClasses'); box.innerHTML = '';
+    model.classes.forEach((c, ci) => {
+      const row = document.createElement('div'); row.className = 'row'; row.style.marginTop = '6px';
+      row.innerHTML = '<span class="grow"><b>' + c.name.replace(/</g, '&lt;') + '</b> <span class="note">' + c.ex.length + ' example' + (c.ex.length === 1 ? '' : 's') + ' · detected ' + (c.hits || 0) + '×</span></span>';
+      const rec = document.createElement('button'); rec.textContent = 'Record'; rec.className = 'rec';
+      rec.onclick = () => recordExample(ci, rec);
+      const undo = document.createElement('button'); undo.textContent = 'Undo'; undo.disabled = !c.ex.length;
+      undo.onclick = () => { c.ex.pop(); save(); retrain(); };
+      const del = document.createElement('button'); del.textContent = '✕';
+      del.onclick = () => { if (del.dataset.c) { model.classes.splice(ci, 1); save(); retrain(); } else { del.dataset.c = 1; del.textContent = 'Delete?'; setTimeout(() => { del.textContent = '✕'; delete del.dataset.c; }, 2500); } };
+      row.append(rec, undo, del); box.appendChild(row);
+    });
+  }
+  function recordExample(ci, btn) {
+    if (!an) { $('detAccNote').textContent = 'Tap Start listening first.'; return; }
+    if (recording) return;
+    recording = []; btn.classList.add('on'); btn.textContent = 'Recording…';
+    setTimeout(() => {
+      const fr = bestWindow(recording); recording = null; btn.classList.remove('on'); btn.textContent = 'Record';
+      if (fr.length < CLIP * 0.8) return;
+      model.classes[ci].ex.push(clipFeatures(fr).map(x => +x.toFixed(3))); save(); retrain();
+    }, 1500);
+  }
+  $('detAdd').addEventListener('click', () => {
+    const name = $('detName').value.trim(); if (!name) return;
+    if (model.classes.some(c => c.name.toLowerCase() === name.toLowerCase())) return;
+    model.classes.push({ name, ex: [], hits: 0 }); $('detName').value = ''; save(); retrain();
+  });
+  $('detTest').addEventListener('click', retrain);
+  $('detClear').addEventListener('click', () => {
+    const b = $('detClear');
+    if (b.dataset.c) { model = { classes: [] }; save(); retrain(); $('detLog').innerHTML = ''; b.textContent = 'Clear detector'; delete b.dataset.c; }
+    else { b.dataset.c = 1; b.textContent = 'Tap again to clear'; setTimeout(() => { b.textContent = 'Clear detector'; delete b.dataset.c; }, 3000); }
+  });
+  $('detConf').addEventListener('input', e => $('detConfOut').textContent = e.target.value + '%');
+
+  // ---- live classification ----
+  let lastLabel = -1, streak = 0; const lastFire = {}; let logN = 0;
+  function classifyLive() {
+    if (!stats || frames.length < CLIP || recording) return;
+    const q = z(clipFeatures(frames.slice(-CLIP)), stats);
+    const r = knn(q, trained);
+    const bg = model.classes.findIndex(c => /^(background|quiet|none|noise)$/i.test(c.name));
+    const unknown = r.nearest > typicalD * 2;
+    const thr = +$('detConf').value / 100;
+    const now = $('detNow');
+    if (unknown) { now.textContent = 'Unknown sound'; now.style.color = 'var(--dim)'; streak = 0; lastLabel = -1; return; }
+    const name = model.classes[r.ci].name;
+    now.textContent = name + ' · ' + Math.round(r.conf * 100) + '%';
+    now.style.color = r.ci === bg ? 'var(--dim)' : r.conf >= thr ? 'var(--accent)' : 'var(--warn)';
+    if (r.ci === lastLabel) streak++; else { streak = 1; lastLabel = r.ci; }
+    const t = performance.now();
+    if (r.ci !== bg && r.conf >= thr && streak >= 2 && (!lastFire[r.ci] || t - lastFire[r.ci] > 1500)) {
+      lastFire[r.ci] = t; model.classes[r.ci].hits = (model.classes[r.ci].hits || 0) + 1; logN++;
+      const line = document.createElement('div');
+      line.textContent = new Date().toLocaleTimeString() + '  ' + name + '  (' + Math.round(r.conf * 100) + '%)';
+      $('detLog').prepend(line); $('detLogCount').textContent = logN + ' total';
+      renderClasses();
+    }
+  }
+  window.__det = { model: () => model, retrain };
+  retrain();
 })();
 </script>
 </body>
