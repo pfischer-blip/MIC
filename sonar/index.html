@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b1220">
+<title>Sonar</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+  :root { --bg:#0b1220; --card:#131c2e; --fg:#e6edf7; --mut:#8a98b0; --acc:#38bdf8; --ok:#34d399; --warn:#fbbf24; --bad:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+         padding:env(safe-area-inset-top) 12px calc(env(safe-area-inset-bottom) + 12px); -webkit-user-select:none; user-select:none; }
+  h1 { font-size:18px; margin:12px 0 8px; font-weight:600; letter-spacing:.02em; }
+  .card { background:var(--card); border-radius:14px; padding:12px; margin-bottom:10px; }
+  .big { font-size:56px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1; }
+  .sub { color:var(--mut); font-size:14px; font-variant-numeric:tabular-nums; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  .row > * { flex:1; }
+  button { font:inherit; font-weight:600; border:0; border-radius:12px; padding:14px 10px; background:#22304a; color:var(--fg); }
+  button.primary { background:var(--acc); color:#04121f; }
+  button.on { background:var(--bad); color:#fff; }
+  button:disabled { opacity:.4; }
+  .seg { display:flex; background:#0e1626; border-radius:10px; padding:3px; margin-top:8px; }
+  .seg button { flex:1; padding:8px; background:transparent; color:var(--mut); border-radius:8px; }
+  .seg button.sel { background:#22304a; color:var(--fg); }
+  canvas { width:100%; display:block; border-radius:10px; background:#0e1626; }
+  #motion { font-size:22px; font-weight:600; margin-top:6px; min-height:1.4em; }
+  #status { font-size:13px; color:var(--mut); min-height:1.3em; }
+  details summary { cursor:pointer; color:var(--mut); }
+  label { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:8px 0; font-size:14px; }
+  input, select { font:inherit; background:#0e1626; color:var(--fg); border:1px solid #2a3a58; border-radius:8px; padding:6px 8px; width:120px; }
+  .help { font-size:13px; color:var(--mut); }
+  .help b { color:var(--fg); }
+  .legend { font-size:12px; color:var(--mut); margin-top:4px; }
+  .legend i { display:inline-block; width:10px; height:3px; vertical-align:middle; margin:0 4px 0 8px; }
+</style>
+</head>
+<body>
+<h1>📡 Phone Sonar</h1>
+
+<div class="card">
+  <div class="big" id="dist">--</div>
+  <div class="sub" id="distsub">Press Start, point the bottom of the phone at a surface</div>
+  <div id="motion"></div>
+  <div class="seg" id="modeSeg">
+    <button data-mode="distance" class="sel">Distance</button>
+    <button data-mode="motion">Movement</button>
+  </div>
+</div>
+
+<div class="row" style="margin-bottom:10px">
+  <button id="startBtn" class="primary">Start</button>
+  <button id="calBtn" disabled>Calibrate</button>
+</div>
+<div id="status"></div>
+
+<div class="card">
+  <canvas id="profile" height="170"></canvas>
+  <div class="legend"><i style="background:#5b6b86"></i>raw echo <i style="background:#fbbf24"></i>calibration <i style="background:#38bdf8"></i>what's detected</div>
+</div>
+<div class="card">
+  <canvas id="history" height="150"></canvas>
+  <div class="legend">Distance over the last 15 s</div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>Settings</summary>
+    <label>Air temperature (°C) <input id="temp" type="number" value="20" step="1"></label>
+    <label>Ping sound
+      <select id="band">
+        <option value="3000,11000">Audible chirp 3–11 kHz (best)</option>
+        <option value="2000,6000">Low chirp 2–6 kHz</option>
+        <option value="16000,20000">Near-ultrasonic 16–20 kHz (quieter)</option>
+      </select></label>
+    <label>Min distance (m) <input id="minR" type="number" value="0.3" step="0.05" min="0.05"></label>
+    <label>Max distance (m) <input id="maxR" type="number" value="4" step="0.5" min="0.5" max="15"></label>
+    <label>Correction (cm) <input id="offset" type="number" value="0" step="0.5"></label>
+    <label>Volume <input id="vol" type="range" min="0.05" max="1" step="0.05" value="0.8"></label>
+    <label>Sensitivity (min SNR dB) <input id="snr" type="number" value="10" step="1"></label>
+    <div class="row"><button id="zeroBtn">Set correction from known distance…</button></div>
+    <p class="help">Speed of sound used: <span id="cval"></span> m/s. Sample rate: <span id="fsval">–</span> Hz.</p>
+  </details>
+</div>
+
+<div class="card help">
+  <p><b>How to use.</b> Turn the volume up and the ring/silent switch off. Press <b>Start</b>. Point the <b>bottom edge</b> of the phone (speaker grille and mic) at a flat surface such as a wall, and keep your hand off the grille.</p>
+  <p><b>Calibrate</b> for best results: point the phone at open space (or straight up at a high ceiling) and press Calibrate. It records the phone's own speaker-to-mic sound and the room's fixed echoes, then subtracts them.</p>
+  <p><b>Movement</b> mode ignores everything that stays still and tracks whatever moves (for example, your hand or a person walking toward the phone), and shows approach/recede speed.</p>
+  <p><b>How it works.</b> The speaker plays a short chirp 20 times a second. The mic hears it twice: directly, and again after it bounces off something. Distance = speed of sound × time between the two ÷ 2. Measuring from the direct sound cancels the phone's unknown audio delay.</p>
+  <p><b>Limits.</b> Phone speakers are not directional, so it reports the strongest reflector in a wide cone, not exactly where you point. Large flat hard surfaces work best; soft or small things are weak. On iPhone the web version can't choose which mic/speaker iOS uses.</p>
+</div>
+
+<script src="dsp.js"></script>
+<script src="app.js"></script>
+<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
+</body>
+</html>
