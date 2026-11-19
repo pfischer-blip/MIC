@@ -115,6 +115,34 @@
 </div>
 
 <div class="panel">
+  <div class="label"><span>Recognize sounds (AI)</span><span id="aiState">off</span></div>
+  <div id="aiNow" style="font-size:22px;font-weight:700;margin:4px 0">–</div>
+  <div class="note" id="aiTop" style="min-height:18px"></div>
+  <div id="aiGroups" style="margin-top:6px"></div>
+  <div class="row" style="margin-top:8px;font-size:13px;gap:10px">
+    <label><input type="checkbox" id="aiG_Voices" checked> Voices</label>
+    <label><input type="checkbox" id="aiG_Animals" checked> Animals</label>
+    <label><input type="checkbox" id="aiG_Birds" checked> Birds</label>
+    <label><input type="checkbox" id="aiG_Insects" checked> Insects</label>
+    <label><input type="checkbox" id="aiG_Vehicles" checked> Vehicles</label>
+    <label><input type="checkbox" id="aiG_Guns" checked> Guns</label>
+    <label><input type="checkbox" id="aiG_Tools" checked> Tools</label>
+  </div>
+  <div class="slider"><span>Threshold</span><input id="aiThr" type="range" min="10" max="90" step="5" value="30"><output id="aiThrOut">30%</output></div>
+  <button id="aiBtn" class="primary" style="width:100%;margin-top:10px" disabled>Turn on recognition</button>
+  <div class="label" style="margin-top:12px"><span>Recognized</span><span id="aiLogCount"></span></div>
+  <div id="aiLog" class="note" style="max-height:140px;overflow:auto"></div>
+  <details style="margin-top:8px"><summary>What this can and can't do</summary>
+    <ul class="note">
+      <li>Uses Google's <b>YAMNet</b> model, trained on AudioSet (521 everyday sound types). It runs entirely on your phone; no audio leaves it. The first use downloads about 26 MB.</li>
+      <li><b>It does not reach 90% on everything.</b> Google reports a balanced mean average precision of 0.306 across all 521 classes. An independent test on the ESC-50 dataset got 92% for the animal category overall, but some individual sounds scored far lower.</li>
+      <li><b>A contact mic hears vibration, not air.</b> Voices, birds and gunshots in the air will be faint or missing through a piezo. Use the phone's built-in mic (pick it under Input) for those. Tools, engines and insects in wood couple well into a contact mic.</li>
+      <li>For a specific sound you need at 90%, train the <b>Sound detector</b> below with your own examples. It measures its own accuracy.</li>
+    </ul>
+  </details>
+</div>
+
+<div class="panel">
   <div class="label"><span>Sound details</span><span id="sdInfo"></span></div>
   <canvas id="sgram" style="height:140px"></canvas>
   <div class="readout">
@@ -1092,6 +1120,101 @@
   window.__det = { model: () => model, retrain };
   retrain();
 })();
+</script>
+<script type="module">
+// ---------- Pretrained sound recognition (YAMNet via MediaPipe Audio Classifier) ----------
+// Model: YAMNet, trained on Google's AudioSet (521 sound classes). Runs fully on the phone.
+const $ = id => document.getElementById(id);
+const GROUPS = [
+  { key: 'Voices',   re: /^(Speech|Hubbub, speech noise, speech babble|Child speech, kid speaking|Conversation|Narration, monologue|Babbling|Speech synthesizer|Shout|Bellow|Whoop|Yell|Children shouting|Screaming|Whispering|Laughter|Baby laughter|Giggle|Snicker|Belly laugh|Chuckle, chortle|Crying, sobbing|Baby cry, infant cry|Whimper|Wail, moan|Sigh|Singing|Choir|Yodeling|Chant|Mantra|Child singing|Rapping|Humming|Groan|Grunt)$/ },
+  { key: 'Birds',    re: /^(Bird|Bird vocalization, bird call, bird song|Chirp, tweet|Squawk|Pigeon, dove|Coo|Crow|Caw|Owl|Hoot|Bird flight, flapping wings|Gull, seagull|Seagull|Duck|Quack|Goose|Honk|Chicken, rooster|Cluck|Crowing, cock-a-doodle-doo|Fowl|Turkey|Gobble)$/ },
+  { key: 'Insects',  re: /^(Insect|Cricket|Mosquito|Fly, housefly|Buzz|Bee, wasp, etc\.)$/ },
+  { key: 'Animals',  re: /^(Animal|Domestic animals, pets|Dog|Bark|Yip|Howl|Bow-wow|Growling|Whimper \(dog\)|Cat|Purr|Meow|Hiss|Caterwaul|Livestock, farm animals, working animals|Horse|Clip-clop|Neigh, whinny|Cattle, bovinae|Moo|Cowbell|Pig|Oink|Goat|Bleat|Sheep|Wild animals|Roaring cats \(lions, tigers\)|Roar|Canidae, dogs, wolves|Rodents, rats, mice|Mouse|Patter|Frog|Croak|Snake|Rattle|Whale vocalization)$/ },
+  { key: 'Vehicles', re: /^(Vehicle|Motor vehicle \(road\)|Car|Vehicle horn, car horn, honking|Toot|Car alarm|Power windows, electric windows|Skidding|Tire squeal|Car passing by|Race car, auto racing|Truck|Air brake|Air horn, truck horn|Reversing beeps|Ice cream truck, ice cream van|Bus|Emergency vehicle|Police car \(siren\)|Ambulance \(siren\)|Fire engine, fire truck \(siren\)|Motorcycle|Traffic noise, roadway noise|Engine|Light engine \(high frequency\)|Medium engine \(mid frequency\)|Heavy engine \(low frequency\)|Engine knocking|Engine starting|Idling|Accelerating, revving, vroom|Siren|Civil defense siren|Train|Train whistle|Train horn|Railroad car, train wagon|Train wheels squealing|Subway, metro, underground|Aircraft|Aircraft engine|Jet engine|Propeller, airscrew|Helicopter|Fixed-wing aircraft, airplane|Bicycle|Skateboard|Boat, Water vehicle|Motorboat, speedboat)$/ },
+  { key: 'Guns',     re: /^(Gunshot, gunfire|Machine gun|Fusillade|Artillery fire|Cap gun)$/ },
+  { key: 'Tools',    re: /^(Tools|Hammer|Jackhammer|Sawing|Filing \(rasp\)|Sanding|Power tool|Drill|Chainsaw|Lawn mower|Wood|Chop|Splinter|Crack|Ratchet, pawl|Mechanisms|Gears|Pulleys|Sewing machine|Mechanical fan|Air conditioning|Vacuum cleaner|Electric shaver, electric razor|Blender|Hair dryer)$/ },
+];
+let classifier = null, ctx = null, ring = null, ringPos = 0, filled = 0, sr = 48000, timer = null, on = false;
+const lastFire = {}; let logN = 0;
+const groupOf = {}; // categoryName -> group key
+
+function setStatus(t) { $('aiState').textContent = t; }
+
+window.addEventListener('cm-started', e => {
+  ctx = e.detail.ctx; sr = ctx.sampleRate;
+  ring = new Float32Array(Math.round(sr * 1.0));
+  const sp = ctx.createScriptProcessor(4096, 1, 1), sink = ctx.createGain(); sink.gain.value = 0;
+  e.detail.node.connect(sp); sp.connect(sink); sink.connect(ctx.destination);
+  sp.onaudioprocess = ev => {
+    if (!on) return;
+    const x = ev.inputBuffer.getChannelData(0);
+    for (let i = 0; i < x.length; i++) { ring[ringPos] = x[i]; ringPos = (ringPos + 1) % ring.length; }
+    filled = Math.min(ring.length, filled + x.length);
+  };
+  window.__aiSp = sp;
+  $('aiBtn').disabled = false;
+});
+
+async function load() {
+  setStatus('downloading model (about 26 MB, first time only)…');
+  const { AudioClassifier } = await import('./vendor/mediapipe/audio_bundle.mjs');
+  const base = new URL('./vendor/mediapipe/', location.href).href;
+  classifier = await AudioClassifier.createFromOptions(
+    { wasmLoaderPath: base + 'audio_wasm_internal.js', wasmBinaryPath: base + 'audio_wasm_internal.wasm' },
+    { baseOptions: { modelAssetPath: base + 'yamnet.tflite' }, maxResults: -1 });
+}
+
+function classifyNow() {
+  if (!classifier || filled < ring.length) return;
+  const clip = new Float32Array(ring.length);
+  clip.set(ring.subarray(ringPos)); clip.set(ring.subarray(0, ringPos), ring.length - ringPos);
+  let res;
+  try { res = classifier.classify(clip, sr); } catch (err) { setStatus('error: ' + err.message); return; }
+  const scores = {};
+  res.forEach(r => r.classifications[0].categories.forEach(c => { scores[c.categoryName] = Math.max(scores[c.categoryName] || 0, c.score); }));
+  const top = Object.entries(scores).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  $('aiTop').textContent = top.map(([n, s]) => n + ' ' + Math.round(s * 100) + '%').join(' · ');
+  const g = {};
+  GROUPS.forEach(G => g[G.key] = 0);
+  Object.entries(scores).forEach(([n, s]) => {
+    if (!(n in groupOf)) { const G = GROUPS.find(G => G.re.test(n)); groupOf[n] = G ? G.key : null; }
+    const k = groupOf[n]; if (k && s > g[k]) g[k] = s;
+  });
+  const thr = +$('aiThr').value / 100;
+  const box = $('aiGroups'); box.innerHTML = '';
+  GROUPS.forEach(G => {
+    const enabled = $('aiG_' + G.key).checked, s = g[G.key];
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid;grid-template-columns:80px 1fr 44px;gap:8px;align-items:center;margin:3px 0;font-size:13px;opacity:' + (enabled ? 1 : .35);
+    row.innerHTML = '<span>' + G.key + '</span><span style="background:#0a0d10;border-radius:6px;height:12px;position:relative;overflow:hidden"><span style="position:absolute;left:0;top:0;bottom:0;width:' + Math.round(s * 100) + '%;background:' + (s >= thr ? 'var(--accent)' : '#2e5e52') + '"></span><span style="position:absolute;top:-2px;bottom:-2px;width:2px;background:#e6edf3;left:' + Math.round(thr * 100) + '%"></span></span><span style="text-align:right">' + Math.round(s * 100) + '%</span>';
+    box.appendChild(row);
+    const t = performance.now();
+    if (enabled && s >= thr && (!lastFire[G.key] || t - lastFire[G.key] > 3000)) {
+      lastFire[G.key] = t; logN++;
+      const best = Object.entries(scores).filter(([n]) => groupOf[n] === G.key).sort((a, b) => b[1] - a[1])[0];
+      const line = document.createElement('div');
+      line.textContent = new Date().toLocaleTimeString() + '  ' + G.key + ': ' + best[0] + ' (' + Math.round(best[1] * 100) + '%)';
+      $('aiLog').prepend(line); $('aiLogCount').textContent = logN + ' total';
+    }
+  });
+  const hit = GROUPS.filter(G => $('aiG_' + G.key).checked && g[G.key] >= thr).sort((a, b) => g[b.key] - g[a.key])[0];
+  $('aiNow').textContent = hit ? hit.key : 'Nothing from your list';
+  $('aiNow').style.color = hit ? 'var(--accent)' : 'var(--dim)';
+}
+
+$('aiBtn').addEventListener('click', async () => {
+  const b = $('aiBtn');
+  if (on) { on = false; clearInterval(timer); b.textContent = 'Turn on recognition'; b.classList.remove('on'); setStatus('off'); return; }
+  b.disabled = true;
+  try {
+    if (!classifier) await load();
+    on = true; filled = 0; timer = setInterval(classifyNow, 1000);
+    b.textContent = 'Turn off recognition'; b.classList.add('on'); setStatus('listening');
+  } catch (err) { setStatus('could not load the model: ' + (err && err.message ? err.message : err)); }
+  b.disabled = false;
+});
+$('aiThr').addEventListener('input', e => $('aiThrOut').textContent = e.target.value + '%');
+window.__ai = { groupOf, GROUPS };
 </script>
 </body>
 </html>
