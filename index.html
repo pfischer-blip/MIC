@@ -75,6 +75,13 @@
   th { color: var(--dim); font-weight: 600; font-size: 11px; text-transform: uppercase; }
   .q-good { color: var(--accent); } .q-mid { color: var(--warn); } .q-bad { color: var(--hot); }
 </style>
+<script>
+// Collect errors from the start so they can be shown in Diagnostics.
+window.__cmErrors = [];
+window.addEventListener('error', e => { window.__cmErrors.push((e.message || 'error') + (e.filename ? ' @' + e.filename.split('/').pop() + ':' + e.lineno : '')); showTopErr(); });
+window.addEventListener('unhandledrejection', e => { window.__cmErrors.push('promise: ' + (e.reason && e.reason.message ? e.reason.message : e.reason)); showTopErr(); });
+function showTopErr() { const el = document.getElementById('err'); if (el) { el.style.display = 'block'; el.textContent = 'Something went wrong: ' + window.__cmErrors[window.__cmErrors.length - 1] + ' (see Diagnostics at the bottom)'; } }
+</script>
 </head>
 <body>
 <header>
@@ -315,6 +322,14 @@
 </div><!-- /view-tg -->
 
 <div class="panel">
+  <details id="diagBox">
+    <summary>Diagnostics (if something isn't working)</summary>
+    <pre id="diagTxt" class="note" style="white-space:pre-wrap;font-size:11px;margin:6px 0"></pre>
+    <button id="diagCopy" style="width:100%">Copy diagnostics</button>
+  </details>
+</div>
+
+<div class="panel">
   <details>
     <summary>Connecting a piezo to an iPhone</summary>
     <ul class="note">
@@ -361,10 +376,13 @@
     } catch (e) { /* ignore */ }
   }
 
-  async function openStream(deviceId) {
+  function getStream(deviceId) {
     const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 1 } };
     if (deviceId) audio.deviceId = { exact: deviceId };
-    const s = await navigator.mediaDevices.getUserMedia({ audio });
+    return navigator.mediaDevices.getUserMedia({ audio });
+  }
+  async function openStream(deviceId, given) {
+    const s = given || await getStream(deviceId);
     if (stream) stream.getTracks().forEach(t => t.stop());
     stream = s;
     if (src) src.disconnect();
@@ -389,8 +407,13 @@
       return;
     }
     try {
-      ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
-      if (ctx.state === 'suspended') await ctx.resume();
+      // iPhone: open the mic first, then create the audio engine, so both use the same sample rate.
+      $('status').textContent = 'Asking for microphone…';
+      const first = await getStream();
+      const AC = window.AudioContext || window.webkitAudioContext;
+      ctx = new AC();
+      try { await ctx.resume(); } catch (e) {}
+      window.__cmCtx = ctx;
       hpf = ctx.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = 10; hpf.Q.value = 0.707;
       gainNode = ctx.createGain(); gainNode.gain.value = dbToLin(+$('gain').value);
       analyser = ctx.createAnalyser(); analyser.fftSize = 4096; analyser.smoothingTimeConstant = 0.6;
@@ -400,8 +423,9 @@
       hpf.connect(gainNode); gainNode.connect(analyser); gainNode.connect(monGain); gainNode.connect(recDest);
       monGain.connect(ctx.destination);
       freqBuf = new Float32Array(analyser.frequencyBinCount);
-      await openStream();
+      await openStream(undefined, first);
       running = true;
+      if (ctx.state !== 'running') $('status').innerHTML = '<b style="color:var(--warn)">Tap anywhere to start audio</b>';
       window.dispatchEvent(new CustomEvent('cm-started', { detail: { ctx, node: hpf, analyser } }));
       $('start-wrap').style.display = 'none';
       ['monBtn', 'recBtn', 'holdReset'].forEach(id => $(id).disabled = false);
@@ -415,6 +439,9 @@
     }
   }
 
+  document.addEventListener('touchend', () => { if (ctx && ctx.state !== 'running') ctx.resume().then(() => { if (stream) $('status').innerHTML = '<b>Listening</b><br>' + (stream.getAudioTracks()[0].label || 'microphone'); }).catch(() => {}); }, { passive: true });
+  document.addEventListener('click', () => { if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {}); });
+  window.__cmStream = () => stream;
   async function keepAwake() {
     try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
   }
@@ -1215,6 +1242,31 @@ $('aiBtn').addEventListener('click', async () => {
 });
 $('aiThr').addEventListener('input', e => $('aiThrOut').textContent = e.target.value + '%');
 window.__ai = { groupOf, GROUPS };
+</script>
+<script>
+(() => {
+  const txt = () => {
+    const c = window.__cmCtx, st = window.__cmStream && window.__cmStream(), t = st && st.getAudioTracks()[0];
+    let set = {}; try { set = t ? t.getSettings() : {}; } catch (e) {}
+    return [
+      'Page: ' + location.href,
+      'Browser: ' + navigator.userAgent,
+      'Secure (https): ' + window.isSecureContext,
+      'Mic API: ' + !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+      'Audio engine: ' + (c ? c.state + ', ' + c.sampleRate + ' Hz' : 'not started'),
+      'Input: ' + (t ? (t.label || '?') + ', ' + t.readyState + (t.muted ? ', MUTED' : '') + ', ' + (set.sampleRate || '?') + ' Hz' : 'none'),
+      'Level now: ' + (document.getElementById('rmsTxt') || {}).textContent,
+      'Timegrapher: ' + (document.getElementById('tgQuality') || {}).textContent,
+      'AI: ' + (document.getElementById('aiState') || {}).textContent,
+      'Errors: ' + (window.__cmErrors.length ? window.__cmErrors.join(' | ') : 'none'),
+    ].join('\n');
+  };
+  setInterval(() => { if (document.getElementById('diagBox').open) document.getElementById('diagTxt').textContent = txt(); }, 1000);
+  document.getElementById('diagBox').addEventListener('toggle', () => document.getElementById('diagTxt').textContent = txt());
+  document.getElementById('diagCopy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(txt()); document.getElementById('diagCopy').textContent = 'Copied'; } catch (e) { document.getElementById('diagCopy').textContent = 'Copy failed, take a screenshot instead'; }
+  });
+})();
 </script>
 </body>
 </html>
