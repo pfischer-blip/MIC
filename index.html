@@ -158,6 +158,34 @@
         <option>12000</option><option>14400</option><option>17280</option><option>18000</option><option>19800</option>
         <option>21600</option><option>25200</option><option>28800</option><option>36000</option><option>43200</option>
       </select></div>
+    <div style="grid-column:1 / -1"><label for="tgMov">Movement (sets the lift angle)</label>
+      <select id="tgMov">
+        <option value="52|Not a movement value. 52° is the usual fallback when the lift angle is unknown">Unknown / generic (52°)</option>
+        <option value="custom|Your own value.">Custom (type it below)</option>
+        <optgroup label="Seiko / TMI">
+          <option value="53|Caliber Corner, NH35A spec table">Seiko NH35 / NH36 (53°)</option>
+          <option value="53|Caliber Corner, 4R36 spec table">Seiko 4R35 / 4R36 (53°)</option>
+          <option value="53|Caliber Corner, 7S26 spec table">Seiko 7S26 (53°)</option>
+          <option value="53|Seiko 6R35 technical guide (via Cousins UK)">Seiko 6R35 (53°)</option>
+        </optgroup>
+        <optgroup label="Miyota (Citizen)">
+          <option value="49|Miyota data sheet for 8215 / 8205 / 821A / 820A">Miyota 8215 / 8205 / 821A / 820A (49°)</option>
+          <option value="51|Caliber Corner, 9015 spec table">Miyota 9015 (51°)</option>
+        </optgroup>
+        <optgroup label="ETA">
+          <option value="50|WatchGuy lift angle list (ETA 2824-2)">ETA 2824-2 (50°)</option>
+          <option value="50|WatchGuy lift angle list (ETA 2836-2)">ETA 2836-2 (50°)</option>
+          <option value="52|WatchGuy lift angle list (ETA 2892A2)">ETA 2892-A2 (52°)</option>
+          <option value="53|WatchGuy lift angle list (ETA 2671)">ETA 2671 (53°)</option>
+          <option value="53|WatchGuy lift angle list (ETA 2801)">ETA 2801 (53°)</option>
+          <option value="44|WatchGuy lift angle list (ETA 6497)">ETA 6497 (44°)</option>
+          <option value="50|WatchGuy lift angle list (ETA 7001)">ETA 7001 (50°)</option>
+        </optgroup>
+        <optgroup label="Other">
+          <option value="49|WatchGuy and WatchmakingTools lists (A. Schild 1130)">A. Schild 1130 (49°)</option>
+        </optgroup>
+      </select>
+      <div class="note" id="tgMovSrc" style="margin-top:4px"></div></div>
     <div><label for="tgLa">Lift angle (°)</label><input id="tgLa" type="number" min="10" max="90" step="1" value="52"></div>
     <div><label for="tgWin">Averaging window</label>
       <select id="tgWin"><option value="6">6 s</option><option value="10" selected>10 s</option><option value="20">20 s</option><option value="30">30 s</option></select></div>
@@ -490,6 +518,27 @@
   $('tabListen').addEventListener('click', () => showTab(false));
   $('tabTg').addEventListener('click', () => showTab(true));
 
+  // ---- movement / lift angle picker ----
+  const movSel = $('tgMov'), laIn = $('tgLa');
+  const applyMov = () => {
+    const [v, src] = movSel.value.split('|');
+    if (v !== 'custom') laIn.value = v;
+    $('tgMovSrc').textContent = 'Source: ' + src + '. Check your movement\'s service sheet if you can.';
+    try { localStorage.setItem('cm-tg-mov', movSel.selectedIndex); localStorage.setItem('cm-tg-la', laIn.value); } catch (e) {}
+  };
+  movSel.addEventListener('change', applyMov);
+  laIn.addEventListener('input', () => {
+    const [v] = movSel.value.split('|');
+    if (v !== laIn.value) { movSel.selectedIndex = 1; $('tgMovSrc').textContent = 'Source: your own value.'; }
+    try { localStorage.setItem('cm-tg-mov', movSel.selectedIndex); localStorage.setItem('cm-tg-la', laIn.value); } catch (e) {}
+  });
+  try {
+    const i = localStorage.getItem('cm-tg-mov'), la = localStorage.getItem('cm-tg-la');
+    if (i !== null) movSel.selectedIndex = +i;
+    applyMov();
+    if (movSel.selectedIndex === 1 && la) { laIn.value = la; $('tgMovSrc').textContent = 'Source: your own value.'; }
+  } catch (e) { applyMov(); }
+
   // ---- audio tap ----
   window.addEventListener('cm-started', e => {
     ctx = e.detail.ctx;
@@ -743,7 +792,7 @@
   $('posSave').addEventListener('click', () => {
     if (!last) { $('posMsg').textContent = 'No reading yet. Wait for the numbers to appear first.'; return; }
     const pos = $('posSel').value;
-    log[pos] = { rate: last.rate, amp: last.amp, be: last.be, bph: last.bph, la: last.la, time: new Date().toISOString() };
+    log[pos] = { rate: last.rate, amp: last.amp, be: last.be, bph: last.bph, la: last.la, mov: movSel.options[movSel.selectedIndex].text, time: new Date().toISOString() };
     persist(); drawPositions();
     $('posMsg').textContent = 'Saved ' + pos + '.';
     const i = ORDER.indexOf(pos); if (i < ORDER.length - 1) $('posSel').value = ORDER[i + 1];
@@ -754,8 +803,8 @@
     else { b.dataset.confirm = 1; b.textContent = 'Tap again to clear'; setTimeout(() => { b.textContent = 'Clear all'; delete b.dataset.confirm; }, 3000); }
   });
   $('posCopy').addEventListener('click', async () => {
-    const rows = [['position', 'rate_s_per_day', 'amplitude_deg', 'beat_error_ms', 'bph', 'lift_angle_deg', 'time']];
-    ORDER.forEach(p => { const r = log[p]; if (r) rows.push([p, r.rate.toFixed(1), r.amp ? Math.round(r.amp) : '', r.be.toFixed(1), r.bph, r.la, r.time]); });
+    const rows = [['position', 'rate_s_per_day', 'amplitude_deg', 'beat_error_ms', 'bph', 'lift_angle_deg', 'movement', 'time']];
+    ORDER.forEach(p => { const r = log[p]; if (r) rows.push([p, r.rate.toFixed(1), r.amp ? Math.round(r.amp) : '', r.be.toFixed(1), r.bph, r.la, '"' + (r.mov || '') + '"', r.time]); });
     const csv = rows.map(r => r.join(',')).join('\n');
     try { await navigator.clipboard.writeText(csv); $('posMsg').textContent = 'Copied ' + (rows.length - 1) + ' rows.'; }
     catch (e) { $('posMsg').textContent = 'Copy failed. Here it is:\n' + csv; }
