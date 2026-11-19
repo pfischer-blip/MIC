@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d1014">
+<title>Contact Mic Live</title>
+<style>
+  :root {
+    --bg: #0d1014; --panel: #161b22; --line: #252c36; --text: #e6edf3; --dim: #8b96a3;
+    --accent: #3fd0a8; --warn: #f0b429; --hot: #f2545b;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { padding: calc(env(safe-area-inset-top) + 12px) calc(env(safe-area-inset-right) + 12px)
+         calc(env(safe-area-inset-bottom) + 16px) calc(env(safe-area-inset-left) + 12px);
+         max-width: 760px; margin: 0 auto; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+  .status { font-size: 12px; color: var(--dim); text-align: right; }
+  .status b { color: var(--accent); font-weight: 600; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-bottom: 10px; }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--dim);
+           display: flex; justify-content: space-between; margin-bottom: 6px; }
+  canvas { display: block; width: 100%; border-radius: 8px; background: #0a0d10; touch-action: none; }
+  #wave { height: 130px; } #spec { height: 170px; } #meter { height: 26px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row + .row { margin-top: 10px; }
+  button { appearance: none; border: 1px solid var(--line); background: #1f2630; color: var(--text);
+           border-radius: 10px; padding: 11px 14px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button.primary { background: var(--accent); color: #062018; border-color: var(--accent); }
+  button.on { background: #12352c; border-color: var(--accent); color: var(--accent); }
+  button.rec.on { background: #3a1416; border-color: var(--hot); color: var(--hot); }
+  button:disabled { opacity: .4; }
+  .grow { flex: 1; }
+  select { width: 100%; background: #1f2630; color: var(--text); border: 1px solid var(--line);
+           border-radius: 10px; padding: 10px; font-size: 15px; }
+  .slider { display: grid; grid-template-columns: 92px 1fr 64px; gap: 8px; align-items: center; margin-top: 8px; }
+  .slider span:first-child { color: var(--dim); font-size: 13px; }
+  .slider output { text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .readout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+  .readout div { background: #0a0d10; border-radius: 8px; padding: 6px 8px; }
+  .readout small { display: block; color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .6px; }
+  .readout span { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .note { font-size: 13px; color: var(--dim); }
+  .note b { color: var(--text); }
+  .warn { color: var(--warn); }
+  .err { color: var(--hot); font-size: 14px; margin-top: 8px; display: none; }
+  details summary { cursor: pointer; color: var(--text); font-weight: 600; padding: 4px 0; }
+  details ul { padding-left: 18px; margin: 6px 0; }
+  details li { margin: 4px 0; }
+  #recs a { display: block; color: var(--accent); margin-top: 6px; word-break: break-all; }
+  #start-wrap { text-align: center; padding: 18px 8px; }
+  #start-wrap p { margin: 10px 0 0; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .tabs button { flex: 1; padding: 10px; }
+  .tabs button.active { background: var(--accent); color: #062018; border-color: var(--accent); }
+  .big { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .big div { background: #0a0d10; border-radius: 10px; padding: 8px 10px; }
+  .big small { display: block; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+  .big span { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .big em { font-style: normal; font-size: 13px; color: var(--dim); margin-left: 4px; }
+  .field { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .field label { font-size: 12px; color: var(--dim); display: block; }
+  .field input, .field select { width: 100%; background: #1f2630; color: var(--text); border: 1px solid var(--line);
+           border-radius: 10px; padding: 9px; font-size: 15px; }
+  #trace { height: 150px; } #tmpl { height: 110px; } #posChart { height: 170px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 4px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--dim); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  .q-good { color: var(--accent); } .q-mid { color: var(--warn); } .q-bad { color: var(--hot); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Contact Mic Live</h1>
+  <div class="status" id="status">Not listening</div>
+</header>
+
+<div class="panel" id="start-wrap">
+  <button class="primary" id="startBtn" style="width:100%;padding:16px;font-size:17px">Start listening</button>
+  <p class="note">Plug in your mic (or USB-C audio interface) first, then tap Start and allow microphone access.</p>
+  <div class="err" id="err"></div>
+</div>
+
+<div class="tabs">
+  <button id="tabListen" class="active">Listen</button>
+  <button id="tabTg">Timegrapher</button>
+</div>
+
+<div id="view-listen">
+<div class="panel">
+  <div class="label"><span>Waveform</span><span id="waveInfo">tap to freeze</span></div>
+  <canvas id="wave"></canvas>
+</div>
+
+<div class="panel">
+  <div class="label"><span>Spectrum</span><span id="peakHz">peak: –</span></div>
+  <canvas id="spec"></canvas>
+</div>
+
+<div class="panel">
+  <div class="label"><span>Level</span><span id="clip"></span></div>
+  <canvas id="meter"></canvas>
+  <div class="readout">
+    <div><small>RMS</small><span id="rmsTxt">–</span></div>
+    <div><small>Peak</small><span id="peakTxt">–</span></div>
+    <div><small>Max hold</small><span id="holdTxt">–</span></div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="label"><span>Controls</span></div>
+  <div class="slider"><span>Input gain</span><input id="gain" type="range" min="-12" max="40" step="0.5" value="0"><output id="gainOut">0 dB</output></div>
+  <div class="slider"><span>Low cut</span><input id="hpf" type="range" min="0" max="400" step="5" value="0"><output id="hpfOut">off</output></div>
+  <div class="slider"><span>Monitor vol</span><input id="mon" type="range" min="0" max="100" step="1" value="70"><output id="monOut">70%</output></div>
+  <div class="row" style="margin-top:12px">
+    <button id="monBtn" class="grow" disabled>Headphones: off</button>
+    <button id="recBtn" class="grow rec" disabled>Record</button>
+    <button id="holdReset" disabled>Reset hold</button>
+  </div>
+  <p class="note warn" id="monWarn" style="display:none">Monitoring through the phone speaker will feed back into the mic. Use headphones.</p>
+  <div id="recs"></div>
+</div>
+
+<div class="panel">
+  <div class="label"><span>Input</span></div>
+  <select id="devSel" disabled><option>Start listening to see inputs</option></select>
+  <div class="readout" style="grid-template-columns:repeat(2,1fr)">
+    <div><small>Sample rate</small><span id="srTxt">–</span></div>
+    <div><small>Channels</small><span id="chTxt">–</span></div>
+    <div><small>Echo cancel</small><span id="ecTxt">–</span></div>
+    <div><small>Noise suppr.</small><span id="nsTxt">–</span></div>
+  </div>
+  <p class="note">This page asks the phone to turn off echo cancellation, noise suppression and auto gain, which would otherwise mangle a contact mic. The boxes above show what the phone actually reports.</p>
+</div>
+
+</div><!-- /view-listen -->
+
+<div id="view-tg" style="display:none">
+<div class="panel">
+  <div class="label"><span>Timegrapher</span><span id="tgQuality">waiting for ticks</span></div>
+  <div class="big">
+    <div><small>Rate</small><span id="tgRate">–</span><em>s/day</em></div>
+    <div><small>Amplitude</small><span id="tgAmp">–</span><em>°</em></div>
+    <div><small>Beat error</small><span id="tgBe">–</span><em>ms</em></div>
+    <div><small>Beat rate</small><span id="tgBph">–</span><em id="tgBphUnit">bph</em></div>
+  </div>
+  <div class="field">
+    <div><label for="tgBphSel">Beat rate</label>
+      <select id="tgBphSel">
+        <option value="0">Auto-detect</option>
+        <option>12000</option><option>14400</option><option>17280</option><option>18000</option><option>19800</option>
+        <option>21600</option><option>25200</option><option>28800</option><option>36000</option><option>43200</option>
+      </select></div>
+    <div><label for="tgLa">Lift angle (°)</label><input id="tgLa" type="number" min="10" max="90" step="1" value="52"></div>
+    <div><label for="tgWin">Averaging window</label>
+      <select id="tgWin"><option value="6">6 s</option><option value="10" selected>10 s</option><option value="20">20 s</option><option value="30">30 s</option></select></div>
+    <div><label for="tgCal">Phone clock correction (s/day)</label><input id="tgCal" type="number" step="0.1" value="0"></div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="label"><span>Trace (tick vs tock, against nominal rate)</span><span id="tgTraceInfo"></span></div>
+  <canvas id="trace"></canvas>
+  <p class="note">Two lines that run flat = on time. Sloping up = gaining, down = losing. The gap between the lines is beat error.</p>
+</div>
+
+<div class="panel">
+  <div class="label"><span>Averaged tick sound</span><span id="tgPulse"></span></div>
+  <canvas id="tmpl"></canvas>
+  <p class="note">Markers show the unlock sound and the loudest (drop) sound used for amplitude.</p>
+</div>
+
+<div class="panel">
+  <div class="label"><span>Positions</span></div>
+  <div class="row">
+    <select id="posSel" class="grow" style="width:auto">
+      <option>Dial up</option><option>Dial down</option><option>Crown up</option>
+      <option>Crown down</option><option>Crown left</option><option>Crown right</option>
+    </select>
+    <button id="posSave" class="primary">Save reading</button>
+  </div>
+  <p class="note">Let the reading settle for 20 to 30 seconds in each position before saving. Saving a position again replaces it.</p>
+  <table id="posTable"><thead><tr><th>Position</th><th>Rate</th><th>Amp</th><th>BE</th></tr></thead><tbody></tbody></table>
+  <div class="readout" id="posSummary" style="grid-template-columns:repeat(3,1fr)">
+    <div><small>Average rate</small><span id="sumAvg">–</span></div>
+    <div><small>Delta (max−min)</small><span id="sumDelta">–</span></div>
+    <div><small>Amp DU − CD</small><span id="sumAmpDrop">–</span></div>
+  </div>
+  <canvas id="posChart" style="margin-top:10px"></canvas>
+  <div class="row" style="margin-top:10px">
+    <button id="posCopy" class="grow">Copy as CSV</button>
+    <button id="posClear" class="grow">Clear all</button>
+  </div>
+  <div class="note" id="posMsg"></div>
+</div>
+
+<div class="panel">
+  <details>
+    <summary>How accurate is this?</summary>
+    <ul class="note">
+      <li><b>Rate</b> is measured against the phone's (or audio interface's) own sample clock. Every 10 ppm of clock error shifts the reading by 0.86 s/day. If you have a reference (for example a watch you've had checked on a proper timegrapher), enter the difference as the clock correction.</li>
+      <li><b>Amplitude</b> depends entirely on the lift angle you enter. Look up the lift angle for your movement; 52° is only a common default. Formula (same as the open-source tg timegrapher): amplitude = lift angle ÷ (2·sin(π·t·bph/7200)), where t is the time from the unlock sound to the drop sound.</li>
+      <li><b>Beat error</b> is half the difference between the tick-to-tock and tock-to-tick intervals.</li>
+      <li>Clamp the watch firmly against the piezo, keep the room quiet, and don't touch the setup while it measures.</li>
+    </ul>
+  </details>
+</div>
+</div><!-- /view-tg -->
+
+<div class="panel">
+  <details>
+    <summary>Connecting a piezo to an iPhone</summary>
+    <ul class="note">
+      <li><b>Best: USB-C audio interface with an instrument (Hi-Z) input.</b> A bare piezo is very high impedance; plugged into a normal mic input it sounds thin and quiet with little bass. A Hi-Z input or a piezo preamp fixes that.</li>
+      <li><b>Headphones</b> plug into the interface's headphone jack for live listening.</li>
+      <li><b>Bluetooth</b> works, but a Bluetooth mic on iPhone runs over the hands-free (phone call) link, which is built for speech, not full-range audio. Fine for checking that something is making noise, not for detail.</li>
+      <li>After plugging in, pick it from the <b>Input</b> list. If it is not listed, unplug and replug it, then reload the page.</li>
+      <li>Keep the screen on while listening; iPhone may stop the mic when the screen locks.</li>
+    </ul>
+  </details>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let ctx, stream, src, hpf, gainNode, analyser, monGain, recDest, recorder, recChunks = [];
+  let frozen = false, holdDb = -Infinity, clipUntil = 0, wakeLock = null, running = false;
+  const timeBuf = new Float32Array(4096);
+  let freqBuf;
+
+  const dbToLin = db => Math.pow(10, db / 20);
+  const fmtDb = v => (isFinite(v) ? v.toFixed(1) : '-∞') + ' dB';
+
+  function fitCanvas(c) {
+    const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    const w = Math.round(r.width * d), h = Math.round(r.height * d);
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    return [c.getContext('2d'), w, h, d];
+  }
+
+  function showErr(msg) { const e = $('err'); e.textContent = msg; e.style.display = 'block'; }
+
+  async function listDevices(currentId) {
+    try {
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput');
+      const sel = $('devSel'); sel.innerHTML = '';
+      devs.forEach((d, i) => {
+        const o = document.createElement('option');
+        o.value = d.deviceId; o.textContent = d.label || ('Input ' + (i + 1));
+        if (d.deviceId === currentId) o.selected = true;
+        sel.appendChild(o);
+      });
+      sel.disabled = devs.length === 0;
+    } catch (e) { /* ignore */ }
+  }
+
+  async function openStream(deviceId) {
+    const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 1 } };
+    if (deviceId) audio.deviceId = { exact: deviceId };
+    const s = await navigator.mediaDevices.getUserMedia({ audio });
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = s;
+    if (src) src.disconnect();
+    src = ctx.createMediaStreamSource(stream);
+    src.connect(hpf);
+    const t = stream.getAudioTracks()[0];
+    const st = t.getSettings ? t.getSettings() : {};
+    $('srTxt').textContent = (st.sampleRate || ctx.sampleRate) + ' Hz';
+    $('chTxt').textContent = st.channelCount || '–';
+    const yn = v => v === undefined ? 'unknown' : (v ? 'ON' : 'off');
+    $('ecTxt').textContent = yn(st.echoCancellation);
+    $('nsTxt').textContent = yn(st.noiseSuppression);
+    $('status').innerHTML = '<b>Listening</b><br>' + (t.label || 'microphone');
+    t.onended = () => { $('status').textContent = 'Input disconnected'; };
+    await listDevices(st.deviceId);
+  }
+
+  async function start() {
+    $('err').style.display = 'none';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showErr('This browser cannot use the microphone here. Open the page in Safari over https.');
+      return;
+    }
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+      if (ctx.state === 'suspended') await ctx.resume();
+      hpf = ctx.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = 10; hpf.Q.value = 0.707;
+      gainNode = ctx.createGain(); gainNode.gain.value = dbToLin(+$('gain').value);
+      analyser = ctx.createAnalyser(); analyser.fftSize = 4096; analyser.smoothingTimeConstant = 0.6;
+      analyser.minDecibels = -110; analyser.maxDecibels = -10;
+      monGain = ctx.createGain(); monGain.gain.value = 0;
+      recDest = ctx.createMediaStreamDestination();
+      hpf.connect(gainNode); gainNode.connect(analyser); gainNode.connect(monGain); gainNode.connect(recDest);
+      monGain.connect(ctx.destination);
+      freqBuf = new Float32Array(analyser.frequencyBinCount);
+      await openStream();
+      running = true;
+      window.dispatchEvent(new CustomEvent('cm-started', { detail: { ctx, node: hpf } }));
+      $('start-wrap').style.display = 'none';
+      ['monBtn', 'recBtn', 'holdReset'].forEach(id => $(id).disabled = false);
+      keepAwake();
+      requestAnimationFrame(draw);
+    } catch (e) {
+      const m = e && e.name === 'NotAllowedError'
+        ? 'Microphone access was blocked. In iPhone Settings > Safari > Microphone, set this site to Allow (or Ask), then reload.'
+        : 'Could not start the microphone: ' + (e && e.message ? e.message : e);
+      showErr(m);
+    }
+  }
+
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && running) {
+      keepAwake();
+      if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+    }
+  });
+
+  // ---------- drawing ----------
+  function draw() {
+    requestAnimationFrame(draw);
+    if (!analyser) return;
+    if (!frozen) analyser.getFloatTimeDomainData(timeBuf);
+    analyser.getFloatFrequencyData(freqBuf);
+    drawWave(); drawSpec(); drawMeter();
+  }
+
+  function drawWave() {
+    const [g, w, h, d] = fitCanvas($('wave'));
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = '#1c232c'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
+    // simple trigger on rising zero crossing for a steadier picture
+    const n = 2048; let startI = 0;
+    for (let i = 1; i < timeBuf.length - n; i++) { if (timeBuf[i - 1] < 0 && timeBuf[i] >= 0) { startI = i; break; } }
+    g.strokeStyle = frozen ? '#f0b429' : '#3fd0a8'; g.lineWidth = 1.5 * d;
+    g.beginPath();
+    for (let x = 0; x < w; x++) {
+      const v = timeBuf[startI + Math.floor(x / w * n)] || 0;
+      const y = h / 2 - Math.max(-1, Math.min(1, v)) * (h / 2 - 2);
+      x ? g.lineTo(x, y) : g.moveTo(x, y);
+    }
+    g.stroke();
+  }
+
+  const F_MIN = 20;
+  function drawSpec() {
+    const c = $('spec'); const [g, w, h, d] = fitCanvas(c);
+    g.clearRect(0, 0, w, h);
+    const nyq = ctx.sampleRate / 2, F_MAX = Math.min(20000, nyq);
+    const lmin = Math.log10(F_MIN), lmax = Math.log10(F_MAX);
+    const xOf = f => (Math.log10(f) - lmin) / (lmax - lmin) * w;
+    const minDb = analyser.minDecibels, maxDb = analyser.maxDecibels;
+    // grid
+    g.fillStyle = '#5b6672'; g.font = (10 * d) + 'px -apple-system, sans-serif'; g.strokeStyle = '#1c232c'; g.lineWidth = 1;
+    [50, 100, 200, 500, 1000, 2000, 5000, 10000].forEach(f => {
+      if (f > F_MAX) return; const x = xOf(f);
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke();
+      g.fillText(f >= 1000 ? (f / 1000) + 'k' : f, x + 2 * d, h - 3 * d);
+    });
+    // spectrum
+    const bins = freqBuf.length, binHz = nyq / bins;
+    let peakV = -Infinity, peakF = 0;
+    const grad = g.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, 'rgba(63,208,168,.85)'); grad.addColorStop(1, 'rgba(63,208,168,.08)');
+    g.beginPath(); g.moveTo(0, h);
+    for (let x = 0; x < w; x++) {
+      const f0 = Math.pow(10, lmin + (x / w) * (lmax - lmin));
+      const f1 = Math.pow(10, lmin + ((x + 1) / w) * (lmax - lmin));
+      let i0 = Math.max(1, Math.floor(f0 / binHz)), i1 = Math.max(i0, Math.floor(f1 / binHz));
+      let v = -Infinity;
+      for (let i = i0; i <= i1 && i < bins; i++) if (freqBuf[i] > v) v = freqBuf[i];
+      if (f0 > 40 && v > peakV) { peakV = v; peakF = f0; }
+      const y = h - Math.max(0, Math.min(1, (v - minDb) / (maxDb - minDb))) * h;
+      g.lineTo(x, y);
+    }
+    g.lineTo(w, h); g.closePath(); g.fillStyle = grad; g.fill();
+    $('peakHz').textContent = peakV > minDb + 15 ? 'peak: ' + (peakF >= 1000 ? (peakF / 1000).toFixed(2) + ' kHz' : Math.round(peakF) + ' Hz') : 'peak: –';
+  }
+
+  function drawMeter() {
+    const [g, w, h] = fitCanvas($('meter'));
+    let sum = 0, pk = 0;
+    for (let i = 0; i < timeBuf.length; i++) { const a = Math.abs(timeBuf[i]); sum += timeBuf[i] * timeBuf[i]; if (a > pk) pk = a; }
+    const rmsDb = 20 * Math.log10(Math.sqrt(sum / timeBuf.length) || 1e-9);
+    const pkDb = 20 * Math.log10(pk || 1e-9);
+    if (pkDb > holdDb) holdDb = pkDb;
+    if (pk >= 0.99) clipUntil = performance.now() + 1500;
+    const range = 60, pos = db => Math.max(0, Math.min(1, (db + range) / range)) * w;
+    g.clearRect(0, 0, w, h);
+    const grad = g.createLinearGradient(0, 0, w, 0);
+    grad.addColorStop(0, '#3fd0a8'); grad.addColorStop(0.8, '#3fd0a8'); grad.addColorStop(0.9, '#f0b429'); grad.addColorStop(1, '#f2545b');
+    g.fillStyle = grad; g.globalAlpha = 0.35; g.fillRect(0, 0, pos(pkDb), h);
+    g.globalAlpha = 1; g.fillRect(0, h * 0.2, pos(rmsDb), h * 0.6);
+    g.fillStyle = '#e6edf3'; g.fillRect(pos(holdDb) - 1, 0, 2, h);
+    $('rmsTxt').textContent = fmtDb(rmsDb); $('peakTxt').textContent = fmtDb(pkDb); $('holdTxt').textContent = fmtDb(holdDb);
+    const clip = $('clip');
+    if (performance.now() < clipUntil) { clip.textContent = 'CLIPPING, lower gain'; clip.style.color = '#f2545b'; }
+    else clip.textContent = '';
+  }
+
+  // ---------- controls ----------
+  $('startBtn').addEventListener('click', start);
+  $('wave').addEventListener('click', () => { frozen = !frozen; $('waveInfo').textContent = frozen ? 'frozen, tap to resume' : 'tap to freeze'; });
+  $('gain').addEventListener('input', e => {
+    const v = +e.target.value; $('gainOut').textContent = (v > 0 ? '+' : '') + v + ' dB';
+    if (gainNode) gainNode.gain.setTargetAtTime(dbToLin(v), ctx.currentTime, 0.02);
+  });
+  $('hpf').addEventListener('input', e => {
+    const v = +e.target.value; $('hpfOut').textContent = v ? v + ' Hz' : 'off';
+    if (hpf) hpf.frequency.setTargetAtTime(Math.max(10, v), ctx.currentTime, 0.02);
+  });
+  const setMon = () => { if (monGain) monGain.gain.setTargetAtTime($('monBtn').classList.contains('on') ? (+$('mon').value / 100) : 0, ctx.currentTime, 0.02); };
+  $('mon').addEventListener('input', e => { $('monOut').textContent = e.target.value + '%'; setMon(); });
+  $('monBtn').addEventListener('click', () => {
+    const b = $('monBtn'); const on = !b.classList.contains('on');
+    b.classList.toggle('on', on); b.textContent = 'Headphones: ' + (on ? 'on' : 'off');
+    $('monWarn').style.display = on ? 'block' : 'none';
+    if (ctx.state !== 'running') ctx.resume();
+    setMon();
+  });
+  $('holdReset').addEventListener('click', () => { holdDb = -Infinity; });
+  $('devSel').addEventListener('change', async e => {
+    try { await openStream(e.target.value); } catch (err) { showErr('Could not switch input: ' + err.message); $('start-wrap').style.display = 'block'; }
+  });
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => { if (running) listDevices(stream && stream.getAudioTracks()[0].getSettings().deviceId); });
+  }
+
+  $('recBtn').addEventListener('click', () => {
+    const b = $('recBtn');
+    if (recorder && recorder.state === 'recording') { recorder.stop(); return; }
+    if (!window.MediaRecorder) { showErr('Recording is not supported in this browser.'); return; }
+    const types = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+    const type = types.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+    recChunks = [];
+    recorder = new MediaRecorder(recDest.stream, type ? { mimeType: type, audioBitsPerSecond: 256000 } : undefined);
+    const t0 = Date.now(); let timer;
+    recorder.ondataavailable = e => { if (e.data.size) recChunks.push(e.data); };
+    recorder.onstop = () => {
+      clearInterval(timer); b.classList.remove('on'); b.textContent = 'Record';
+      const mime = recorder.mimeType || type || 'audio/mp4';
+      const blob = new Blob(recChunks, { type: mime });
+      const ext = mime.includes('webm') ? 'webm' : 'm4a';
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = 'contact-mic-' + stamp + '.' + ext;
+      a.textContent = 'Save ' + a.download + ' (' + Math.round((Date.now() - t0) / 1000) + ' s)';
+      $('recs').prepend(a);
+    };
+    recorder.start(1000);
+    b.classList.add('on');
+    timer = setInterval(() => { b.textContent = 'Stop ' + Math.round((Date.now() - t0) / 1000) + 's'; }, 250);
+    b.textContent = 'Stop 0s';
+  });
+})();
+</script>
+<script>
+// ---------- Timegrapher ----------
+// Method follows the open-source "tg" timegrapher (github.com/vacaboja/tg):
+// 3 kHz high-pass, envelope, fold/average tick sounds, amplitude = LA / (2 sin(pi * pulse / Pfull)),
+// rate = (nominal beat / measured beat - 1) * 86400.
+(() => {
+  const $ = id => document.getElementById(id);
+  const PRESETS = [12000, 14400, 17280, 18000, 19800, 21600, 25200, 28800, 36000, 43200];
+  const ENV_RATE = 12000;            // target envelope sample rate (Hz)
+  const RING_SECONDS = 32;
+  let ctx, fs, D, ring, ringLen, total = 0, active = false, timer = null;
+  let autoBph = 0, autoVotes = 0, autoCand = 0;
+  let last = null;                   // last analysis result
+
+  // ---- tab switching ----
+  function showTab(tg) {
+    $('view-listen').style.display = tg ? 'none' : 'block';
+    $('view-tg').style.display = tg ? 'block' : 'none';
+    $('tabListen').classList.toggle('active', !tg);
+    $('tabTg').classList.toggle('active', tg);
+    active = tg;
+    if (tg) { drawPositions(); }
+  }
+  $('tabListen').addEventListener('click', () => showTab(false));
+  $('tabTg').addEventListener('click', () => showTab(true));
+
+  // ---- audio tap ----
+  window.addEventListener('cm-started', e => {
+    ctx = e.detail.ctx;
+    D = Math.max(1, Math.round(ctx.sampleRate / ENV_RATE));
+    fs = ctx.sampleRate / D;
+    ringLen = Math.ceil(fs * RING_SECONDS);
+    ring = new Float32Array(ringLen);
+    const hp1 = ctx.createBiquadFilter(); hp1.type = 'highpass'; hp1.frequency.value = 3000; hp1.Q.value = 0.707;
+    const hp2 = ctx.createBiquadFilter(); hp2.type = 'highpass'; hp2.frequency.value = 3000; hp2.Q.value = 0.707;
+    const sp = ctx.createScriptProcessor(16384, 1, 1);
+    const sink = ctx.createGain(); sink.gain.value = 0;
+    e.detail.node.connect(hp1); hp1.connect(hp2); hp2.connect(sp); sp.connect(sink); sink.connect(ctx.destination);
+    let acc = 0, k = 0;
+    sp.onaudioprocess = ev => {
+      const x = ev.inputBuffer.getChannelData(0);
+      for (let i = 0; i < x.length; i++) {
+        const a = x[i] < 0 ? -x[i] : x[i];
+        if (a > acc) acc = a;
+        if (++k === D) { ring[total % ringLen] = acc; total++; acc = 0; k = 0; }
+      }
+    };
+    window.__tgSp = sp; // keep a reference so it is not garbage collected
+    timer = setInterval(() => { if (active) analyze(); }, 1000);
+  });
+
+  // ---- helpers ----
+  function percentile(arr, p, step) {
+    const s = []; for (let i = 0; i < arr.length; i += step) s.push(arr[i]);
+    s.sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))] || 0;
+  }
+  function onsets(e, thr, refr) {
+    const out = []; let lastI = -1e9;
+    for (let i = 1; i < e.length; i++) if (e[i] > thr && e[i - 1] <= thr && i - lastI > refr) { out.push(i); lastI = i; }
+    return out;
+  }
+  function median(a) { const s = a.slice().sort((x, y) => x - y); return s.length ? s[s.length >> 1] : 0; }
+
+  function analyze() {
+    const winS = +$('tgWin').value;
+    const N = Math.min(total, Math.floor(winS * fs));
+    if (N < fs * 3) { status('collecting…', 'q-mid'); return; }
+    // copy window out of ring, smooth 0.5 ms
+    const raw = new Float32Array(N), e = new Float32Array(N);
+    const start = total - N;
+    for (let i = 0; i < N; i++) raw[i] = ring[(start + i) % ringLen];
+    const w = Math.max(1, Math.round(fs * 0.0005)); let run = 0;
+    for (let i = 0; i < N; i++) { run += raw[i]; if (i >= w) run -= raw[i - w]; e[i] = run / w; }
+
+    const noise = percentile(e, 0.5, 5), top = percentile(e, 0.997, 1);
+    if (top < noise * 4 || top < 1e-5) { status('no clear ticks, press the watch to the mic', 'q-bad'); clearNums(); return; }
+    const thr = noise + 0.3 * (top - noise);
+
+    // beat rate
+    let bph = +$('tgBphSel').value;
+    if (!bph) {
+      const o1 = onsets(e, thr, Math.round(0.04 * fs));
+      const iv = []; for (let i = 1; i < o1.length; i++) iv.push((o1[i] - o1[i - 1]) / fs);
+      if (iv.length < 6) { status('too few ticks detected', 'q-bad'); clearNums(); return; }
+      const m = median(iv);
+      let best = PRESETS[0], bd = 1e9;
+      PRESETS.forEach(p => { const d = Math.abs(Math.log((3600 / p) / m)); if (d < bd) { bd = d; best = p; } });
+      if (best === autoCand) autoVotes++; else { autoCand = best; autoVotes = 1; }
+      if (!autoBph || autoVotes >= 3) autoBph = autoCand;
+      bph = autoBph;
+    }
+    const Pb = 3600 / bph * fs;       // beat period in envelope samples
+    const Pfull = 2 * Pb;
+
+    // events with refractory 0.6 beat, assign beat indices
+    const on = onsets(e, thr, Math.round(0.6 * Pb));
+    if (on.length < 8) { status('too few ticks detected', 'q-bad'); clearNums(); return; }
+    let ev = [], lastN = -1;
+    on.forEach(t => { const n = Math.round((t - on[0]) / Pb); if (n > lastN) { ev.push({ t, n }); lastN = n; } });
+
+    const pre = Math.round(0.2 * Pb), post = Math.round(0.3 * Pb), L = pre + post;
+    ev = ev.filter(x => x.t - pre - 8 >= 0 && x.t + post + 8 < N);
+    if (ev.length < 8) { status('too few ticks detected', 'q-bad'); clearNums(); return; }
+
+    const buildT = () => [0, 1].map(par => {
+      const T = new Float32Array(L); let c = 0;
+      ev.forEach(x => { if ((x.n & 1) !== par) return; const b = Math.round(x.t - pre); for (let j = 0; j < L; j++) T[j] += e[b + j]; c++; });
+      if (c) for (let j = 0; j < L; j++) T[j] /= c;
+      return T;
+    });
+    // refine each event by cross-correlation against its parity template (2 passes)
+    const S = Math.round(0.003 * fs);
+    for (let pass = 0; pass < 2; pass++) {
+      const T = buildT();
+      ev.forEach(x => {
+        const tm = T[x.n & 1]; const b0 = Math.round(x.t - pre);
+        let best = -1, bs = 0; const cc = [];
+        for (let s = -S; s <= S; s++) {
+          const b = b0 + s; if (b < 0 || b + L >= N) { cc.push(-1); continue; }
+          let v = 0; for (let j = 0; j < L; j++) v += tm[j] * e[b + j];
+          cc.push(v); if (v > best) { best = v; bs = s; }
+        }
+        // parabolic interpolation
+        const i = bs + S; let frac = 0;
+        if (i > 0 && i < cc.length - 1) { const a = cc[i - 1], b = cc[i], c = cc[i + 1]; const den = a - 2 * b + c; if (den < 0) frac = 0.5 * (a - c) / den; }
+        x.t = Math.round(x.t) + bs + frac;
+      });
+    }
+    const T = buildT();
+
+    // amplitude & per-parity reference point (tg method)
+    const la = Math.min(90, Math.max(10, +$('tgLa').value || 52));
+    const ref = [0, 0], loud = [0, 0], unlock = [-1, -1];
+    let ampAbs = null;
+    const g = [0, 1].map(par => { let m = 0, mi = 0; T[par].forEach((v, j) => { if (v > m) { m = v; mi = j; } }); loud[par] = mi; return m; });
+    const Q = Math.round(Pfull / 8);
+    const nz = [0, 1].map(par => { const t = T[par]; let m = 0; for (let j = 0; j < Math.max(1, loud[par] - Q); j++) if (t[j] > m) m = t[j]; return m; });
+    let th = Math.max(0.01 * Math.max(g[0], g[1]), 1.4 * Math.max(nz[0], nz[1]));
+    const glob = Math.max(g[0], g[1]);
+    while (th < 0.2 * glob) {
+      const pulses = [0, 1].map(par => {
+        const t = T[par]; let j = Math.max(0, loud[par] - Q);
+        while (j < loud[par] && t[j] <= th) j++;
+        while (j + 1 < loud[par] && t[j + 1] > t[j]) j++;
+        return j < loud[par] ? { a: j, p: (loud[par] - j) } : null;
+      });
+      if (pulses[0] && pulses[1]) {
+        const abs = pulses.map(p => 0.5 / Math.sin(Math.PI * p.p / Pfull));
+        const amps = abs.map(a => la * a);
+        if (amps.every(a => a > 135 && a < 360) && Math.abs(amps[0] - amps[1]) < 60) {
+          ampAbs = (abs[0] + abs[1]) / 2; unlock[0] = pulses[0].a; unlock[1] = pulses[1].a; break;
+        }
+      }
+      th *= 1.1;
+    }
+    for (let par = 0; par < 2; par++) ref[par] = unlock[par] >= 0 ? unlock[par] : loud[par];
+
+    // Regression with a common slope and a separate intercept for each (segment, parity) group.
+    // Segments split the data where the timing jumps (an audio dropout); outliers are removed.
+    let pts = ev.map(x => ({ n: x.n, par: x.n & 1, t: x.t - pre + ref[x.n & 1] }));
+    const iv2 = [];
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length && j <= i + 3; j++)
+      if (pts[j].n - pts[i].n === 2) iv2.push((pts[j].t - pts[i].t) / 2);
+    const b0 = iv2.length ? median(iv2) : Pb;
+    const jump = 0.001 * fs;
+    let seg = 0; const lastR = [null, null];
+    pts.forEach(p => {
+      const r = p.t - b0 * p.n;
+      if (lastR[p.par] !== null && Math.abs(r - lastR[p.par]) > jump) { seg++; lastR[0] = lastR[1] = null; }
+      lastR[p.par] = r; p.seg = seg;
+    });
+    const fitGroups = list => {
+      const G = new Map();
+      list.forEach(p => { const k = p.seg * 2 + p.par; if (!G.has(k)) G.set(k, []); G.get(k).push(p); });
+      let sxy = 0, sxx = 0; const mean = new Map();
+      G.forEach((q, k) => { const mn = q.reduce((s, p) => s + p.n, 0) / q.length, mt = q.reduce((s, p) => s + p.t, 0) / q.length; mean.set(k, { mn, mt, c: q.length }); q.forEach(p => { sxy += (p.n - mn) * (p.t - mt); sxx += (p.n - mn) * (p.n - mn); }); });
+      const b = sxx ? sxy / sxx : b0; let sse = 0;
+      const icpt = new Map(); mean.forEach((m, k) => icpt.set(k, m.mt - b * m.mn));
+      list.forEach(p => { p.r = p.t - (icpt.get(p.seg * 2 + p.par) + b * p.n); sse += p.r * p.r; });
+      return { b, sxx, icpt, mean, sigma: Math.sqrt(sse / Math.max(1, list.length - G.size - 1)) };
+    };
+    // keep groups with at least 3 points
+    const cnt = new Map(); pts.forEach(p => { const k = p.seg * 2 + p.par; cnt.set(k, (cnt.get(k) || 0) + 1); });
+    pts = pts.filter(p => cnt.get(p.seg * 2 + p.par) >= 3);
+    if (pts.filter(p => p.par === 0).length < 3 || pts.filter(p => p.par === 1).length < 3) { status('only one of tick/tock is audible', 'q-bad'); clearNums(); return; }
+    let F = fitGroups(pts);
+    const mad = median(pts.map(p => Math.abs(p.r))) * 1.4826;
+    const lim = Math.max(4 * mad, 0.0002 * fs);
+    const kept = pts.filter(p => Math.abs(p.r) <= lim);
+    if (kept.length >= 8 && kept.length < pts.length) { pts = kept; F = fitGroups(pts); }
+    const b = F.b, sigma = F.sigma, seB = sigma / Math.sqrt(F.sxx || 1);
+    // beat error: intercept difference between parities within each segment, weighted by count
+    let beSum = 0, beW = 0;
+    for (let sg = 0; sg <= seg; sg++) {
+      const e0 = F.mean.get(sg * 2), e1 = F.mean.get(sg * 2 + 1);
+      if (e0 && e1) { const wgt = Math.min(e0.c, e1.c); beSum += Math.abs(F.icpt.get(sg * 2 + 1) - F.icpt.get(sg * 2)) * wgt; beW += wgt; }
+    }
+    if (!beW) { status('signal too broken up to measure', 'q-bad'); clearNums(); return; }
+    const segFirst = pts[pts.length - 1].seg;
+    const a = [F.icpt.get(segFirst * 2) ?? 0, F.icpt.get(segFirst * 2 + 1) ?? 0];
+    pts.forEach(p => { const e0 = F.icpt.get(p.seg * 2); p.tc = e0 === undefined ? p.t : p.t - e0 + a[0]; });
+    const cal = +$('tgCal').value || 0;
+    const rate = (Pb / b - 1) * 86400 + cal;
+    const rateSe = (Pb / (b * b)) * seB * 86400;
+    const be = beSum / beW / fs * 1000;
+    const expected = Math.floor((pts[pts.length - 1].n - pts[0].n)) + 1;
+    const coverage = pts.length / expected;
+    const sigMs = sigma / fs * 1000;
+
+    window.__tgLast = last = { bph, rate, rateSe, be, amp: ampAbs ? la * ampAbs : null, la, pts, a, b, Pb, T, ref, loud, unlock, coverage, sigMs, pulseMs: ampAbs ? (loud[0] - unlock[0] + loud[1] - unlock[1]) / 2 / fs * 1000 : null };
+
+    $('tgRate').textContent = (rate >= 0 ? '+' : '') + rate.toFixed(1);
+    $('tgAmp').textContent = last.amp ? Math.round(last.amp) : '–';
+    $('tgBe').textContent = be.toFixed(1);
+    $('tgBph').textContent = bph; $('tgBphUnit').textContent = +$('tgBphSel').value ? 'bph' : 'bph, auto';
+    const good = coverage > 0.9 && sigMs < 0.3, ok = coverage > 0.7 && sigMs < 1;
+    status('signal ' + (good ? 'good' : ok ? 'fair' : 'poor') + ' · ' + Math.round(coverage * 100) + '% beats · ±' + Math.abs(rateSe).toFixed(1) + ' s/d', good ? 'q-good' : ok ? 'q-mid' : 'q-bad');
+    $('tgPulse').textContent = last.pulseMs ? 'unlock→drop ' + last.pulseMs.toFixed(2) + ' ms' : 'amplitude: no clear unlock sound';
+    drawTrace(); drawTmpl();
+  }
+
+  function status(t, cls) { const q = $('tgQuality'); q.textContent = t; q.className = cls || ''; }
+  function clearNums() { last = null; ['tgRate', 'tgAmp', 'tgBe'].forEach(id => $(id).textContent = '–'); }
+
+  function fit(c) {
+    const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    c.width = Math.round(r.width * d); c.height = Math.round(r.height * d);
+    return [c.getContext('2d'), c.width, c.height, d];
+  }
+
+  function drawTrace() {
+    if (!last) return;
+    const [g, w, h, d] = fit($('trace'));
+    const { pts, a, Pb } = last;
+    // deviation of each beat from the nominal beat, relative to tick line start (ms)
+    const ys = pts.map(p => -(p.tc - (a[0] + Pb * p.n)) / fs * 1000); // up = gaining
+    const n0 = pts[0].n, n1 = pts[pts.length - 1].n;
+    let lo = Math.min(...ys), hi = Math.max(...ys);
+    const span = Math.max(2, hi - lo) * 1.2, mid = (hi + lo) / 2;
+    lo = mid - span / 2; hi = mid + span / 2;
+    g.clearRect(0, 0, w, h);
+    g.fillStyle = '#5b6672'; g.font = (10 * d) + 'px -apple-system, sans-serif';
+    g.fillText('+' + (hi - mid).toFixed(1) + ' ms', 4 * d, 12 * d); g.fillText('−' + (mid - lo).toFixed(1) + ' ms', 4 * d, h - 4 * d);
+    pts.forEach((p, i) => {
+      const x = (p.n - n0) / Math.max(1, n1 - n0) * (w - 8 * d) + 4 * d;
+      const y = h - (ys[i] - lo) / (hi - lo) * h;
+      g.fillStyle = p.par ? '#f0b429' : '#3fd0a8';
+      g.fillRect(x - 1.5 * d, y - 1.5 * d, 3 * d, 3 * d);
+    });
+    $('tgTraceInfo').textContent = 'σ ' + last.sigMs.toFixed(2) + ' ms';
+  }
+
+  function drawTmpl() {
+    if (!last) return;
+    const [g, w, h, d] = fit($('tmpl'));
+    g.clearRect(0, 0, w, h);
+    const { T, unlock, loud } = last;
+    const m = Math.max(...T[0], ...T[1]) || 1;
+    [0, 1].forEach(par => {
+      const t = T[par], y0 = par ? h : h / 2, hh = h / 2 - 4 * d;
+      g.strokeStyle = par ? '#f0b429' : '#3fd0a8'; g.lineWidth = 1.2 * d; g.beginPath();
+      for (let x = 0; x < w; x++) { const v = t[Math.floor(x / w * t.length)] / m; const y = y0 - v * hh; x ? g.lineTo(x, y) : g.moveTo(x, y); }
+      g.stroke();
+      g.fillStyle = '#e6edf3';
+      [unlock[par], loud[par]].forEach(j => { if (j >= 0) g.fillRect(j / t.length * w - 1, y0 - hh, 2, hh); });
+    });
+  }
+
+  // ---- positions log ----
+  const KEY = 'cm-tg-positions';
+  const ORDER = ['Dial up', 'Dial down', 'Crown up', 'Crown down', 'Crown left', 'Crown right'];
+  const ABBR = { 'Dial up': 'DU', 'Dial down': 'DD', 'Crown up': 'CU', 'Crown down': 'CD', 'Crown left': 'CL', 'Crown right': 'CR' };
+  let log = {};
+  try { log = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { log = {}; }
+  const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(log)); } catch (e) {} };
+
+  $('posSave').addEventListener('click', () => {
+    if (!last) { $('posMsg').textContent = 'No reading yet. Wait for the numbers to appear first.'; return; }
+    const pos = $('posSel').value;
+    log[pos] = { rate: last.rate, amp: last.amp, be: last.be, bph: last.bph, la: last.la, time: new Date().toISOString() };
+    persist(); drawPositions();
+    $('posMsg').textContent = 'Saved ' + pos + '.';
+    const i = ORDER.indexOf(pos); if (i < ORDER.length - 1) $('posSel').value = ORDER[i + 1];
+  });
+  $('posClear').addEventListener('click', () => {
+    const b = $('posClear');
+    if (b.dataset.confirm) { log = {}; persist(); drawPositions(); b.textContent = 'Clear all'; delete b.dataset.confirm; $('posMsg').textContent = 'Cleared.'; }
+    else { b.dataset.confirm = 1; b.textContent = 'Tap again to clear'; setTimeout(() => { b.textContent = 'Clear all'; delete b.dataset.confirm; }, 3000); }
+  });
+  $('posCopy').addEventListener('click', async () => {
+    const rows = [['position', 'rate_s_per_day', 'amplitude_deg', 'beat_error_ms', 'bph', 'lift_angle_deg', 'time']];
+    ORDER.forEach(p => { const r = log[p]; if (r) rows.push([p, r.rate.toFixed(1), r.amp ? Math.round(r.amp) : '', r.be.toFixed(1), r.bph, r.la, r.time]); });
+    const csv = rows.map(r => r.join(',')).join('\n');
+    try { await navigator.clipboard.writeText(csv); $('posMsg').textContent = 'Copied ' + (rows.length - 1) + ' rows.'; }
+    catch (e) { $('posMsg').textContent = 'Copy failed. Here it is:\n' + csv; }
+  });
+
+  function drawPositions() {
+    const tb = $('posTable').querySelector('tbody'); tb.innerHTML = '';
+    const have = ORDER.filter(p => log[p]);
+    ORDER.forEach(p => {
+      const r = log[p]; const tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + p + '</td><td>' + (r ? (r.rate >= 0 ? '+' : '') + r.rate.toFixed(1) : '–') + '</td><td>' +
+        (r && r.amp ? Math.round(r.amp) + '°' : '–') + '</td><td>' + (r ? r.be.toFixed(1) : '–') + '</td>';
+      tb.appendChild(tr);
+    });
+    const rates = have.map(p => log[p].rate);
+    $('sumAvg').textContent = rates.length ? ((rates.reduce((s, x) => s + x, 0) / rates.length) >= 0 ? '+' : '') + (rates.reduce((s, x) => s + x, 0) / rates.length).toFixed(1) + ' s/d' : '–';
+    $('sumDelta').textContent = rates.length > 1 ? (Math.max(...rates) - Math.min(...rates)).toFixed(1) + ' s/d' : '–';
+    const du = log['Dial up'], cd = log['Crown down'];
+    $('sumAmpDrop').textContent = du && cd && du.amp && cd.amp ? Math.round(du.amp - cd.amp) + '°' : '–';
+
+    const c = $('posChart'); if (!c.getBoundingClientRect().width) return;
+    const [g, w, h, d] = fit(c); g.clearRect(0, 0, w, h);
+    const maxR = Math.max(5, ...rates.map(Math.abs)) * 1.15;
+    const cw = w / 6, mid = h * 0.45, half = h * 0.4;
+    g.strokeStyle = '#2c3540'; g.beginPath(); g.moveTo(0, mid); g.lineTo(w, mid); g.stroke();
+    g.font = (10 * d) + 'px -apple-system, sans-serif'; g.textAlign = 'center';
+    ORDER.forEach((p, i) => {
+      const r = log[p], x = i * cw + cw / 2;
+      g.fillStyle = '#8b96a3'; g.fillText(ABBR[p], x, h - 4 * d);
+      if (!r) return;
+      const bh = r.rate / maxR * half;
+      g.fillStyle = r.rate >= 0 ? '#3fd0a8' : '#f2545b';
+      g.fillRect(x - cw * 0.3, bh >= 0 ? mid - bh : mid, cw * 0.6, Math.abs(bh));
+      g.fillStyle = '#e6edf3';
+      g.fillText((r.rate >= 0 ? '+' : '') + r.rate.toFixed(1), x, bh >= 0 ? mid - bh - 4 * d : mid - bh + 12 * d);
+    });
+    g.textAlign = 'left'; g.fillStyle = '#5b6672'; g.fillText('rate, s/day (±' + maxR.toFixed(0) + ')', 4 * d, 12 * d);
+  }
+  drawPositions();
+})();
+</script>
+</body>
+</html>
